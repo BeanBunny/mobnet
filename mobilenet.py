@@ -2,6 +2,7 @@
 # !git clone "https://github.com/BeanBunny/mobnet"
 
 # %%
+
 import torch
 import cv2
 import numpy as np
@@ -10,14 +11,16 @@ import sklearn.model_selection
 from tqdm import tqdm
 import os
 
-lr = 0.0001
-EPOCHS = 20
+lr = 0.01
+EPOCHS = 200
 BATCH_SIZE = 20
+WORKERS = 0
+SPLIT = 0.8
+INSTANCESPERBATCH = 0
 
-weight_path = os.path.join(".", "model_20.pt")
 dataset_path = os.path.join(".", "JS.zip")
 paths = [os.path.join(".", "cat", "*.jpg"), os.path.join(".", "dog", "*.jpg")]
-print(weight_path, dataset_path, paths)
+print(dataset_path, paths)
 
 # %%
 import zipfile
@@ -69,13 +72,15 @@ images2 = func(paths[1])
 images3 = images + images2
 
 # %%
-train, test = sklearn.model_selection.train_test_split(images3, train_size=0.8)
+train, test = sklearn.model_selection.train_test_split(images3, train_size=SPLIT)
 
 print('Training set has {} instances'.format(len(train)))
 print('Testing set has {} instances'.format(len(test)))
 
-tr_loader = torch.utils.data.DataLoader(train, batch_size=BATCH_SIZE, shuffle=True, num_workers=3)
-te_loader = torch.utils.data.DataLoader(test, batch_size=BATCH_SIZE, shuffle=False, num_workers=3)
+INSTANCESPERBATCH = len(train)/BATCH_SIZE
+
+tr_loader = torch.utils.data.DataLoader(train, batch_size=BATCH_SIZE, shuffle=True, num_workers=WORKERS)
+te_loader = torch.utils.data.DataLoader(test, batch_size=BATCH_SIZE, shuffle=False, num_workers=WORKERS)
 
 # %%
 loss_fn = torch.nn.CrossEntropyLoss()
@@ -101,8 +106,8 @@ def training():
         optimizer.step()
         
         runl += loss.item()
-        if i % 100 == 99:
-            lastl = runl / 100
+        if i % INSTANCESPERBATCH == INSTANCESPERBATCH-1:
+            lastl = runl / INSTANCESPERBATCH
             print('  batch {} loss: {}'.format(i + 1, lastl))
             runl = 0
     return lastl
@@ -113,6 +118,7 @@ def run_training():
         print('EPOCH {}:'.format(epoch + 1))
         finalModel.train(True)
         avg_loss = training()
+        print('loss: {}'.format(avg_loss))
         finalModel.train(False)
         if epoch == 0:
             best_loss = avg_loss
@@ -120,17 +126,19 @@ def run_training():
             best_loss = avg_loss
             bestweights = finalModel.state_dict()
             bestepoch = epoch + 1
+    print(bestepoch)
     model_path = "model_{}.pt".format(bestepoch)
     torch.save(bestweights, model_path)
+    return model_path
 
-run_training()
+model_path = run_training()
 
 # %% [markdown]
 # <h1>Testing</h1>
 
 # %%
 import sklearn.metrics
-finalModel.load_state_dict(torch.load(weight_path))
+finalModel.load_state_dict(torch.load(model_path))
 finalModel.eval()
 print(device)
 
@@ -146,18 +154,11 @@ def testing():
         labels = labels.cpu().detach().numpy()
         inputs = inputs.cpu().detach().numpy()
         outputs = outputs.cpu().detach().numpy()
+        outputs = outputs.argmax(axis=1)
         result.append(outputs)
         result2.append(labels)
     return np.concatenate(result), np.concatenate(result2)
 outputs, grounds = testing()
-print(outputs, grounds)
-outputs = np.argmax(outputs, axis=0)
-
-# %%
-print(len(outputs))
-print(outputs[0].shape)
-print(outputs)
-print(grounds)
 
 # %%
 print(sklearn.metrics.accuracy_score(grounds, outputs))
@@ -170,8 +171,5 @@ input = torch.randn(1,3,224,224, device="cuda")
 input_names = [ "actual_input_1" ] + [ "learned_%d" % i for i in range(16) ]
 output_names = [ "output1" ]
 torch.onnx.export(finalModel, input, "mobilenet_v2.onnx", input_names=input_names, output_names=output_names)
-
-# %%
-
 
 
