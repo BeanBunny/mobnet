@@ -1,15 +1,28 @@
 # %%
+# !git clone "https://github.com/BeanBunny/mobnet"
+
+# %%
 import torch
 import cv2
 import numpy as np
 import glob
 import sklearn.model_selection
 from tqdm import tqdm
-from torchsummary import summary
+import os
 
 lr = 0.0001
 EPOCHS = 20
 BATCH_SIZE = 20
+
+weight_path = os.path.join(".", "model_20.pt")
+dataset_path = os.path.join(".", "JS.zip")
+paths = [os.path.join(".", "cat", "*.jpg"), os.path.join(".", "dog", "*.jpg")]
+print(weight_path, dataset_path, paths)
+
+# %%
+import zipfile
+with zipfile.ZipFile(dataset_path, "r") as zip_ref:
+    zip_ref.extractall("./")
 
 # %%
 model = torch.hub.load("pytorch/vision:v0.10.0", "mobilenet_v2", pretrained=True)
@@ -34,7 +47,12 @@ finalModel.to(device)
 device
 
 # %%
-paths = ["./JS/cat/*.jpg", "./JS/dog/*.jpg"]
+def splitter(path):
+    temp = path.split('/')[-1]
+    temp = temp.split('\\')[-1]
+    return temp
+
+# %%
 labels = {"cat": 0, "dog": 1}
 def func(path):
     result = []
@@ -42,7 +60,7 @@ def func(path):
         i = cv2.imread(j, cv2.COLOR_BGR2RGB)
         i = i/255
         i = np.transpose(i)
-        i = (i, labels[path.split('/')[2]])
+        i = (i, labels[splitter(os.path.split(path)[0])])
         result.append(i)
     return result
 
@@ -112,7 +130,7 @@ run_training()
 
 # %%
 import sklearn.metrics
-finalModel.load_state_dict(torch.load("./model_20.pt"))
+finalModel.load_state_dict(torch.load(weight_path))
 finalModel.eval()
 print(device)
 
