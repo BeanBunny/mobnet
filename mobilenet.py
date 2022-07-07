@@ -2,30 +2,27 @@
 # !git clone "https://github.com/BeanBunny/mobnet"
 
 # %%
-
 import torch
-import cv2
 import numpy as np
-import glob
 import sklearn.model_selection
 from tqdm import tqdm
 import os
+import torchvision
 
 lr = 0.01
 EPOCHS = 200
 BATCH_SIZE = 20
 WORKERS = 0
 SPLIT = 0.8
-INSTANCESPERBATCH = 0
 
 dataset_path = os.path.join(".", "JS.zip")
-paths = [os.path.join(".", "cat", "*.jpg"), os.path.join(".", "dog", "*.jpg")]
+paths = os.path.join(".", "dataset")
 print(dataset_path, paths)
 
 # %%
 import zipfile
 with zipfile.ZipFile(dataset_path, "r") as zip_ref:
-    zip_ref.extractall("./")
+    zip_ref.extractall("./dataset")
 
 # %%
 model = torch.hub.load("pytorch/vision:v0.10.0", "mobilenet_v2", pretrained=True)
@@ -34,10 +31,12 @@ class MobNet(torch.nn.Module):
         super(MobNet, self).__init__()
         flatten = torch.nn.Flatten()
         drop = torch.nn.Dropout(0.2)
-        linear = torch.nn.Linear(62720, 2)
+        linear = torch.nn.Linear(62720, 7840)
+        linear2 = torch.nn.Linear(7840, 980)
+        linear3 = torch.nn.Linear(980, 2)
         soft = torch.nn.Softmax(dim=1)
         self.model = torch.nn.Sequential(*(list(model.children())[:-1]))
-        self.fc = torch.nn.Sequential(*(flatten, drop, linear, soft))
+        self.fc = torch.nn.Sequential(*(flatten, drop, linear, linear2, linear3, soft))
     def forward(self, x):
         x1 = self.model(x)
         x2 = self.fc(x1)
@@ -56,28 +55,17 @@ def splitter(path):
     return temp
 
 # %%
-labels = {"cat": 0, "dog": 1}
-def func(path):
-    result = []
-    for j in glob.glob(path):
-        i = cv2.imread(j, cv2.COLOR_BGR2RGB)
-        i = i/255
-        i = np.transpose(i)
-        i = (i, labels[splitter(os.path.split(path)[0])])
-        result.append(i)
-    return result
-
-images = func(paths[0])
-images2 = func(paths[1])
-images3 = images + images2
+# try using the 1000 layer too
+# cnn style final layers instead of the fully connected
 
 # %%
-train, test = sklearn.model_selection.train_test_split(images3, train_size=SPLIT)
+transform = torchvision.transforms.Compose([torchvision.transforms.ToTensor(), torchvision.transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])])
+images = torchvision.datasets.ImageFolder(paths, transform=transform)
+
+train, test = sklearn.model_selection.train_test_split(images, train_size=SPLIT)
 
 print('Training set has {} instances'.format(len(train)))
 print('Testing set has {} instances'.format(len(test)))
-
-INSTANCESPERBATCH = len(train)/BATCH_SIZE
 
 tr_loader = torch.utils.data.DataLoader(train, batch_size=BATCH_SIZE, shuffle=True, num_workers=WORKERS)
 te_loader = torch.utils.data.DataLoader(test, batch_size=BATCH_SIZE, shuffle=False, num_workers=WORKERS)
@@ -88,9 +76,8 @@ optimizer = torch.optim.Adam(finalModel.parameters(), lr=lr)
 
 # %%
 def training():
-    runl = 0
     lastl = 0
-    for i, data in enumerate(tr_loader):
+    for _, data in enumerate(tr_loader):
         inputs, labels = data
         labels = labels.to(device)
         inputs = inputs.to(device, dtype=torch.float)
@@ -105,11 +92,7 @@ def training():
         loss.backward()
         optimizer.step()
         
-        runl += loss.item()
-        if i % INSTANCESPERBATCH == INSTANCESPERBATCH-1:
-            lastl = runl / INSTANCESPERBATCH
-            print('  batch {} loss: {}'.format(i + 1, lastl))
-            runl = 0
+        lastl = loss.item()
     return lastl
 
 # %%
@@ -118,8 +101,8 @@ def run_training():
         print('EPOCH {}:'.format(epoch + 1))
         finalModel.train(True)
         avg_loss = training()
-        print('loss: {}'.format(avg_loss))
         finalModel.train(False)
+        print('loss: {}'.format(avg_loss))
         if epoch == 0:
             best_loss = avg_loss
         if best_loss > avg_loss:
